@@ -97,7 +97,9 @@ class PostOffice {
 class BD {
     public:
     std::filesystem::path base{"./data"};
+    std::filesystem::path output{"./output"};
     std::string cur_user{""};
+    std::filesystem::path language_path{"./resurses/languages/"};
     std::filesystem::path nw{"newspapers.xml"};
     std::filesystem::path ph{"printing_house.xml"};
     std::filesystem::path po{"post_office.xml"};
@@ -195,7 +197,6 @@ class BD {
         printing_houses.erase(it);
         return 0;
     }
-
 
     void save_user_data(const std::string& user) {
         std::filesystem::path lg{user};
@@ -313,6 +314,14 @@ class BD {
     void load_user_data(const std::string& user) {
        
     }
+
+    const Newspaper& get_newspaper_by_index(unsigned int indx) {
+        for(int i = 0; i < this->newspapers.size(); i++) {
+            if(this->newspapers[i].index == indx)
+                return this->newspapers[i];
+        }
+        return Newspaper();
+    }
 };
 
 
@@ -323,8 +332,9 @@ class Main : public QMainWindow {
     BD bd;
     unsigned char cur_lan{0};
     
-
+    
 public:
+
     Main(BD bd, QWidget* parent=nullptr) : QMainWindow(parent) {
         ui.setupUi(this);
         this->bd = bd;
@@ -343,6 +353,7 @@ public:
 
         //tab home
         connect(ui.user_create, &QPushButton::clicked, this, &Main::on_user_create);
+        connect(ui.spaces, &QTabWidget::tabBarClicked, this, &Main::on_tab_clicked);
         connect(ui.spaces, &QTabWidget::currentChanged, this, &Main::update_message);
         connect(ui.in, &QPushButton::clicked, this, &Main::on_in);
         connect(ui.out, &QPushButton::clicked, this, &Main::on_out);
@@ -402,12 +413,17 @@ public:
         std::tuple<QString, QString> lan[]{{QString("rus"),QString("Русский")}, {QString("jpn"),QString("日本語")}, {QString("eng"),QString("English")}};
 
         QTranslator translator;
-        translator.load(std::get<0>(lan[cur_lan]));
+        translator.load((bd.language_path/std::filesystem::path(std::get<0>(lan[cur_lan]).toStdString())).c_str());
         QApplication::installTranslator(&translator);
         ui.retranslateUi(this);
 
         ui.change_language->setText(std::get<1>(lan[cur_lan]));
         ui.cur_user->setText(bd.cur_user.c_str());
+
+        std::ofstream file_out("cur_lang");
+        file_out << cur_lan;
+        file_out.close();
+
         cur_lan+=1;
         cur_lan %= sizeof(lan)/sizeof(*lan);
     };
@@ -493,6 +509,12 @@ public:
     void update_message() {
         ui.message->setStyleSheet("");
         ui.message->clear();
+    }
+
+    void on_tab_clicked(int index) {
+        if(index == 4) selection1_update();
+        if(index == 5) selection2_update();
+        if(index == 6) selection3_update();
     }
 
     //tab newspapers
@@ -774,63 +796,220 @@ public:
     //select 1 2 3
     void on_selection1_update(bool) {
         ui.selection1_table->clear();
-        
-
-        if(bd.printing_houses.size()) {
-            
-            //            газета                    тираж              цена
-            //  std::map<unsigned int, std::tuple<unsigned int, unsigned int>> newspapers;
-        
-        
-            ui.selection1_table->setRowCount(bd.printing_houses[0].newspapers.size()+1);
-            ui.selection1_table->setColumnCount(3);
+        auto indx = ui.selection1->itemData(ui.selection1->currentIndex()).value<unsigned int>();
+        // if(!bd.printing_houses.size() || indx==-1)selection1_update();
+        if(bd.printing_houses.size() && indx!=-1) {
+            std::vector<QString> head = {{tr("Subscription index")}, {tr("Title of Newspaper")}, {tr("Topic")}, {tr("Editor")}, {tr("Circulation")}, {tr("Price")}};
+            ui.selection1_table->setRowCount(bd.printing_houses[indx].newspapers.size()+1);
+            ui.selection1_table->setColumnCount(head.size());
             ui.selection1_table->horizontalHeader()->setVisible(false);
             ui.selection1_table->verticalHeader()->setVisible(false);
-            // for(int i = 0; i < bd.printing_houses[0].newspapers.size(); i++) {
-            //     ui.selection1_table->horizontalHeader()->setSectionResizeMode(i, QHeaderView::Stretch);
-            //     ui.selection1_table->verticalHeader()->setSectionResizeMode(i, QHeaderView::Stretch);
-            // }
+            
 
-            std::vector<QString> title = {{"Newspaper"}, {"Count"}, {"Price"}};
-            for(int i = 0; i < title.size(); i++) {
-                    QTableWidgetItem* t = new QTableWidgetItem();
-                    t->setText(title[i]);
-                    ui.selection1_table->setItem(0, i, t);
+            for(int i = 0; i < head.size(); i++) {
+                ui.selection1_table->horizontalHeader()->setSectionResizeMode(i, QHeaderView::Stretch);
+                QTableWidgetItem* t = new QTableWidgetItem();
+                t->setText(head[i]);
+                ui.selection1_table->setItem(0, i, t);
             }
 
             int order{1};
-
-            for(auto& [key, value] : bd.printing_houses[0].newspapers) {
-               
-                QTableWidgetItem* t = new QTableWidgetItem();
-                t->setText(QString::number(key, 10,0));
-                ui.selection1_table->setItem(order, 0, t);
-
+            for(auto& [key, value] : bd.printing_houses[indx].newspapers) {
+                auto ord = bd.get_newspaper_by_index(key);
+                QTableWidgetItem* t0 = new QTableWidgetItem();
+                t0->setText(QString::number(ord.index, 10, 0));
+                t0->setFlags(t0->flags() & ~Qt::ItemIsEditable);
+                ui.selection1_table->setItem(order, 0, t0);
                 QTableWidgetItem* t1 = new QTableWidgetItem();
-                t1->setText(QString::number(std::get<0>(value), 10,0));
+                t1->setText(QString(ord.title.c_str()));
+                t1->setFlags(t1->flags() & ~Qt::ItemIsEditable);
                 ui.selection1_table->setItem(order, 1, t1);
-
                 QTableWidgetItem* t2 = new QTableWidgetItem();
-                t2->setText(QString::number(std::get<1>(value), 10,0));
+                t2->setText(ui.newspaper_topic->itemText(ord.topic));
+                t2->setFlags(t2->flags() & ~Qt::ItemIsEditable);
                 ui.selection1_table->setItem(order, 2, t2);
-                
+                QTableWidgetItem* t3 = new QTableWidgetItem();
+                t3->setText(QString(ord.editor.c_str()));
+                t3->setFlags(t3->flags() & ~Qt::ItemIsEditable);
+                ui.selection1_table->setItem(order, 3, t3);
+                QTableWidgetItem* t4 = new QTableWidgetItem();
+                t4->setText(QString::number(std::get<0>(value), 10,0));
+                t4->setFlags(t4->flags() & ~Qt::ItemIsEditable);
+                ui.selection1_table->setItem(order, 4, t4);
+                QTableWidgetItem* t5 = new QTableWidgetItem();
+                t5->setText(QString::number(std::get<1>(value), 10,2));
+                t5->setFlags(t5->flags() & ~Qt::ItemIsEditable);
+                ui.selection1_table->setItem(order, 5, t5);
                 order++;
             }
         }
-
+        
     }
-    void on_selection1_save(bool) {}
+    void on_selection1_save(bool) {
+        size_t M = ui.selection1_table->rowCount();
+        size_t N = ui.selection1_table->columnCount();
+        std::ofstream file_out("select1.csv");
+    
+        for(int i = 0; i < M; i++) {
+            for(int j = 0; j < N; j++) {
+                file_out << ui.selection1_table->item(i, j)->text().toStdString();
+                if(j+1 != N) file_out <<'\t';
+            }
+            file_out << '\n';
+        }
+        file_out.close();
+    }
 
-    void on_selection2_update(bool) {}
-    void on_selection2_save(bool) {}
+    void on_selection2_update(bool) {
+        ui.selection2_table->clear();
+        auto indx = ui.selection2->itemData(ui.selection2->currentIndex()).value<unsigned int>();
+        
+        if(bd.printing_houses.size() && indx!=-1) {
+            std::vector<QString> head = {{tr("Title Of Printing House")}, {tr("Address")}, {tr("Director")}, {tr("Circulation")}, {tr("Price")}};
+            ui.selection2_table->setRowCount(1);
+            ui.selection2_table->setColumnCount(head.size());
+            ui.selection2_table->horizontalHeader()->setVisible(false);
+            ui.selection2_table->verticalHeader()->setVisible(false);
+            
 
-    void on_selection3_update(bool) {}
-    void on_selection3_save(bool) {}
+            for(int i = 0; i < head.size(); i++) {
+                ui.selection2_table->horizontalHeader()->setSectionResizeMode(i, QHeaderView::Stretch);
+                QTableWidgetItem* t = new QTableWidgetItem();
+                t->setText(head[i]);
+                ui.selection2_table->setItem(0, i, t);
+            }
 
+            int order{1};
+            for(int i = 0; i < bd.printing_houses.size(); i++) {
+                if(bd.printing_houses[i].newspapers.find(indx) != bd.printing_houses[i].newspapers.end()) {
+                    ui.selection2_table->setRowCount(ui.selection2_table->rowCount()+1);
+                    QTableWidgetItem* t0 = new QTableWidgetItem();
+                    t0->setText(bd.printing_houses[i].title.c_str());
+                    t0->setFlags(t0->flags() & ~Qt::ItemIsEditable);
+                    ui.selection2_table->setItem(order, 0, t0);
+                    QTableWidgetItem* t1 = new QTableWidgetItem();
+                    t1->setText(bd.printing_houses[i].address.c_str());
+                    t1->setFlags(t1->flags() & ~Qt::ItemIsEditable);
+                    ui.selection2_table->setItem(order, 1, t1);
+                    QTableWidgetItem* t2 = new QTableWidgetItem();
+                    t2->setText(bd.printing_houses[i].boss.c_str());
+                    t2->setFlags(t2->flags() & ~Qt::ItemIsEditable);
+                    ui.selection2_table->setItem(order, 2, t2);
+                    QTableWidgetItem* t3 = new QTableWidgetItem();
+                    t3->setText(QString::number(std::get<0>(bd.printing_houses[i].newspapers[indx]), 10,0));
+                    t3->setFlags(t3->flags() & ~Qt::ItemIsEditable);
+                    ui.selection2_table->setItem(order, 3, t3);
+                    QTableWidgetItem* t4 = new QTableWidgetItem();
+                    t4->setText(QString::number(std::get<1>(bd.printing_houses[i].newspapers[indx]), 10,2));
+                    t4->setFlags(t4->flags() & ~Qt::ItemIsEditable);
+                    ui.selection2_table->setItem(order, 4, t4);
+                    order++;
 
+                }
+            }
+        }
+    }
+    void on_selection2_save(bool) {
+        size_t M = ui.selection2_table->rowCount();
+        size_t N = ui.selection2_table->columnCount();
+        std::ofstream file_out("select2.csv");
+    
+        for(int i = 0; i < M; i++) {
+            for(int j = 0; j < N; j++) {
+                file_out << ui.selection2_table->item(i, j)->text().toStdString();
+                if(j+1 != N) file_out <<'\t';
+            }
+            file_out << '\n';
+        }
+        file_out.close();
+    }
 
+    void on_selection3_update(bool) {
+        ui.selection3_table->clear();
+        auto indx = ui.selection3->itemData(ui.selection3->currentIndex()).value<unsigned int>();
+        
+        if(bd.printing_houses.size() && indx!=-1) {
+            std::vector<QString> head = {{tr("Title Of Printing House")}, {tr("Address")}, {tr("Director")}, {tr("Circulation")}, {tr("Price")}};
+            ui.selection3_table->setRowCount(1);
+            ui.selection3_table->setColumnCount(head.size());
+            ui.selection3_table->horizontalHeader()->setVisible(false);
+            ui.selection3_table->verticalHeader()->setVisible(false);
+            
+            long double total_cost{0.0};
 
+            for(int i = 0; i < head.size(); i++) {
+                ui.selection3_table->horizontalHeader()->setSectionResizeMode(i, QHeaderView::Stretch);
+                QTableWidgetItem* t = new QTableWidgetItem();
+                t->setText(head[i]);
+                ui.selection3_table->setItem(0, i, t);
+            }
 
+            int order{1};
+            for(int i = 0; i < bd.printing_houses.size(); i++) {
+                if(bd.printing_houses[i].newspapers.find(indx) != bd.printing_houses[i].newspapers.end()) {
+                    ui.selection3_table->setRowCount(ui.selection3_table->rowCount()+1);
+                    QTableWidgetItem* t0 = new QTableWidgetItem();
+                    t0->setText(bd.printing_houses[i].title.c_str());
+                    t0->setFlags(t0->flags() & ~Qt::ItemIsEditable);
+                    ui.selection3_table->setItem(order, 0, t0);
+                    QTableWidgetItem* t1 = new QTableWidgetItem();
+                    t1->setText(bd.printing_houses[i].address.c_str());
+                    t1->setFlags(t1->flags() & ~Qt::ItemIsEditable);
+                    ui.selection3_table->setItem(order, 1, t1);
+                    QTableWidgetItem* t2 = new QTableWidgetItem();
+                    t2->setText(bd.printing_houses[i].boss.c_str());
+                    t2->setFlags(t2->flags() & ~Qt::ItemIsEditable);
+                    ui.selection3_table->setItem(order, 2, t2);
+                    QTableWidgetItem* t3 = new QTableWidgetItem();
+                    t3->setText(QString::number(std::get<0>(bd.printing_houses[i].newspapers[indx]), 10,0));
+                    t3->setFlags(t3->flags() & ~Qt::ItemIsEditable);
+                    ui.selection3_table->setItem(order, 3, t3);
+                    QTableWidgetItem* t4 = new QTableWidgetItem();
+                    t4->setText(QString::number(std::get<1>(bd.printing_houses[i].newspapers[indx]), 10,2));
+                    t4->setFlags(t4->flags() & ~Qt::ItemIsEditable);
+                    ui.selection3_table->setItem(order, 4, t4);
+                    total_cost += std::get<0>(bd.printing_houses[i].newspapers[indx]) * std::get<1>(bd.printing_houses[i].newspapers[indx]);
+                    order++;
+                }
+            }
+            ui.total_cost->setText(QString::number(total_cost, 10, 2));
+        }
+    }
+    void on_selection3_save(bool) {
+        size_t M = ui.selection3_table->rowCount();
+        size_t N = ui.selection3_table->columnCount();
+        std::ofstream file_out("select3.csv");
+    
+        for(int i = 0; i < M; i++) {
+            for(int j = 0; j < N; j++) {
+                file_out << ui.selection3_table->item(i, j)->text().toStdString();
+                if(j+1 != N) file_out <<'\t';
+            }
+            file_out << '\n';
+        }
+        file_out.close();
+    }
+
+    void selection1_update() {
+        ui.selection1->clear();
+        for(int i = 0; i < bd.printing_houses.size(); i++) {
+            ui.selection1->addItem(bd.printing_houses[i].title.c_str(), bd.printing_houses[i].id);
+        }
+    }
+    
+    void selection2_update() {
+        ui.selection2->clear();
+        for(int i = 0; i < bd.newspapers.size(); i++) {
+            ui.selection2->addItem(bd.newspapers[i].title.c_str(), bd.newspapers[i].index);
+        }
+    }
+    
+    void selection3_update() {
+        ui.selection3->clear();
+        for(int i = 0; i < bd.newspapers.size(); i++) {
+            ui.selection3->addItem(bd.newspapers[i].title.c_str(), bd.newspapers[i].index);
+        }
+    }
 
 
     //etc
@@ -859,10 +1038,26 @@ public:
 
 
 int main(int argc, char *argv[]) {
+    QApplication app(argc, argv);
+
     BD bd;
     bd.load();
-    QApplication app(argc, argv);
+
     Main widget(bd);
+
+    
+
+    //load languge
+    // int cur{0};
+    // std::ifstream file_out("cur_lang");
+    // file_out >> cur;
+    // file_out.close();
+    // QTranslator translator;
+
+    // translator.load(QString((bd.language_path/std::filesystem::path(std::get<0>(widget.lan[cur]))).toStdString()));
+    // QApplication::installTranslator(&translator);
+    
+    
     widget.show();
     return app.exec();
 }
