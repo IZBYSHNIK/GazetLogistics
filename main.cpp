@@ -28,6 +28,7 @@
 #include <tuple>
 #include <filesystem>
 #include <tinyxml2.h>
+#include <toml++/toml.hpp>
 
 using namespace tinyxml2;
 
@@ -52,31 +53,32 @@ class Newspaper {
     };
     std::string title;
     int topic{Politics};
-    unsigned int index{0};
+    int index{0};
     std::string editor;
     
     Newspaper() {};
-    Newspaper(const std::string& title, topics topic, unsigned int index, const std::string& editor) : title{title}, topic{topic}, index{index}, editor{editor} {};
+    
+    Newspaper(const std::string& title, topics topic, int index, const std::string& editor) : title{title}, topic{topic}, index{index}, editor{editor} {};
 };
 
 class PrintingHouse {
     public:
-    unsigned int id{0};
+    int id{0};
     std::string title;
     std::string address;
     std::string boss;
     // index from Newspapers and circulation and price for one
-    std::map<unsigned int, std::tuple<unsigned int, unsigned int>> newspapers;
+    std::map<int, std::tuple<int, float>> newspapers;
     
     PrintingHouse() {};
     
-    PrintingHouse(const std::string& title, const std::string& address, const std::string& boss, unsigned int id=0) : title{title}, address{address}, boss{boss}, id{id} {};
+    PrintingHouse(const std::string& title, const std::string& address, const std::string& boss, int id=0) : title{title}, address{address}, boss{boss}, id{id} {};
 
-    bool add_newspaper(unsigned int newspaper_index, std::tuple<unsigned int, unsigned int> circulation_and_price) {
+    bool add_newspaper(int newspaper_index, std::tuple<int, float> circulation_and_price) {
         newspapers[newspaper_index] = circulation_and_price;
         return 0;
     }
-    bool del_newspaper(unsigned int newspaper_index) {
+    bool del_newspaper(int newspaper_index) {
         newspapers.erase(newspaper_index);
         return 0;
     }
@@ -84,14 +86,24 @@ class PrintingHouse {
 
 class PostOffice {
     public:
-    unsigned int number{0};
+    int number{0};
     std::string address;
     std::string region;
-    std::map<unsigned int, std::tuple<unsigned int, unsigned int>> printing_houses;
+
+    //   ID Printing House | Index Newspaper | Count | Price
+    std::map<std::tuple<int, int>, std::tuple<int, float>> printing_houses;
 
     PostOffice() {};
-
-    PostOffice(unsigned int number, const std::string& address, const std::string& region) : number{number}, address{address}, region{region} {};
+    PostOffice(int number, const std::string& address, const std::string& region) : number{number}, address{address}, region{region} {};
+    bool add_order(std::tuple<int, int> IDPrintingHouse_IndexNewspaper, std::tuple<int, float> count_and_price) {
+        printing_houses[IDPrintingHouse_IndexNewspaper] = count_and_price;
+        return 0;
+    }
+    
+    bool del_newspaper(std::tuple<int, int> index) {
+        printing_houses.erase(index);
+        return 0;
+    }
 };
 
 class BD {
@@ -116,6 +128,7 @@ class BD {
         }
         return 0;
     }
+    
     bool is_free_login(const std::string& login) {
         for (const auto& entry : std::filesystem::directory_iterator(base)) {
             auto filename = entry.path().filename();
@@ -178,20 +191,20 @@ class BD {
         return 0;
     }
 
-    bool del_post_office(unsigned int indx) {
+    bool del_post_office(int indx) {
         auto it = post_offices.begin() + indx; 
         post_offices.erase(it);
         return 0;
     }
 
-    bool del_newspapers(unsigned int indx) {
+    bool del_newspapers(int indx) {
         // indx for vector, index not from Newspaper
         auto it = newspapers.begin() + indx; 
         newspapers.erase(it);
         return 0;
     }
 
-    bool del_printing_house(unsigned int indx) {
+    bool del_printing_house(int indx) {
         // indx for vector, index not from Newspaper
         auto it = printing_houses.begin() + indx; 
         printing_houses.erase(it);
@@ -267,7 +280,6 @@ class BD {
             }
             doc.SaveFile((base/lg/ph).string().c_str());
         }
-
         {
             XMLDocument doc;
             auto* declaration = doc.NewDeclaration();
@@ -288,40 +300,214 @@ class BD {
                 post_office->InsertEndChild(region);
 
                 auto* printing_houses = doc.NewElement("printing-houses");
-                // for (const auto& [key, value] : this->printing_houses[i].newspapers) {
-                //     auto* newspaper = doc.NewElement("newspaper");
-                //     newspaper->SetAttribute("index", key);
+                for (const auto& [key, value] : this->post_offices[i].printing_houses) {
+                    auto* printing_house = doc.NewElement("printing-house");
+                    printing_house->SetAttribute("id", std::get<0>(key));
+                    printing_house->SetAttribute("index", std::get<1>(key));
 
-                //     auto* circulation = doc.NewElement("circulation");
-                //     circulation->SetText(std::to_string(std::get<0>(value)).c_str());
-                //     newspaper->InsertEndChild(circulation);
+                    auto* count = doc.NewElement("count");
+                    count->SetText(std::to_string(std::get<0>(value)).c_str());
+                    printing_house->InsertEndChild(count);
 
-                //     auto* price = doc.NewElement("price");
-                //     price->SetText(std::to_string(std::get<1>(value)).c_str());
-                //     newspaper->InsertEndChild(price);
+                    auto* price = doc.NewElement("price");
+                    price->SetText(std::to_string(std::get<1>(value)).c_str());
+                    printing_house->InsertEndChild(price);
 
-
-                //     newspapers->InsertEndChild(newspaper);
-                // }
+                    printing_houses->InsertEndChild(printing_house);
+                }
                 post_office->InsertEndChild(printing_houses);
-
                 root->InsertEndChild(post_office);
             }
             doc.SaveFile((base/lg/po).string().c_str());
         }
+    
     }
 
     void load_user_data(const std::string& user) {
-       
-    }
+        std::filesystem::path lg{user};
 
-    const Newspaper& get_newspaper_by_index(unsigned int indx) {
+        if(!std::filesystem::exists(base/lg/nw)) {
+            XMLDocument doc;
+            auto* declaration = doc.NewDeclaration();
+            doc.InsertFirstChild(declaration);
+            auto* root = doc.NewElement("newspapers");
+            doc.InsertEndChild(root);
+            doc.SaveFile((base/lg/nw).string().c_str());
+        };
+        if(!std::filesystem::exists(base/lg/ph)) {
+            XMLDocument doc;
+            auto* declaration = doc.NewDeclaration();
+            doc.InsertFirstChild(declaration);
+            auto* root = doc.NewElement("printing-houses");
+            doc.InsertEndChild(root);
+            doc.SaveFile((base/lg/ph).string().c_str());
+        };
+        if(!std::filesystem::exists(base/lg/po)) {
+            XMLDocument doc;
+            auto* declaration = doc.NewDeclaration();
+            doc.InsertFirstChild(declaration);
+            auto* root = doc.NewElement("post-offices");
+            doc.InsertEndChild(root);
+            doc.SaveFile((base/lg/po).string().c_str());
+        };
+
+        {
+            XMLDocument doc;
+            doc.LoadFile((base/lg/nw).string().c_str());
+            newspapers.clear();
+
+            auto* root = doc.FirstChildElement("newspapers");
+            auto* newspaper = root->FirstChildElement("newspaper");
+            while (newspaper != NULL) {
+                std::string title;
+                std::string editor;
+                int index {0};
+                int topic {0};
+
+                newspaper->QueryIntAttribute("index", &index);
+                auto* t_title = newspaper->FirstChildElement("title")->GetText();
+                if (t_title) {title = t_title;}
+                newspaper->FirstChildElement("topic")->QueryIntText(&topic);
+                auto* t_editor = newspaper->FirstChildElement("editor")->GetText();
+                if (t_editor) {editor = t_editor;}
+                newspapers.push_back(Newspaper(title, (Newspaper::topics)topic, index, editor));
+                newspaper = newspaper->NextSiblingElement("newspaper");
+            }
+        }
+        {
+            XMLDocument doc;
+            doc.LoadFile((base/lg/ph).string().c_str());
+            printing_houses.clear();
+         
+            auto* root = doc.FirstChildElement("printing-houses");
+            auto* printing_house = root->FirstChildElement("printing-house");
+            while (printing_house != NULL) {
+                std::string title;
+                std::string address;
+                std::string director;
+                int id {0};
+                printing_house->QueryIntAttribute("id", &id);
+                auto* t_title = printing_house->FirstChildElement("title")->GetText();
+                if (t_title) {title = t_title;}
+                auto* t_address = printing_house->FirstChildElement("address")->GetText();
+                if (t_address) {address = t_address;}
+                auto* t_director = printing_house->FirstChildElement("boss")->GetText();
+                if (t_director) {director = t_director;}
+                
+                
+                PrintingHouse t = PrintingHouse(title, address, director, id);
+                auto* newspapers = printing_house->FirstChildElement("newspapers");
+                if(newspapers) {
+                    auto* newspaper = newspapers->FirstChildElement("newspaper");
+                    while (newspaper != NULL) {
+                        int circulation{0};
+                        float price{0};
+                        int index {0};
+                        newspaper->QueryIntAttribute("index", &index);
+                        
+                        newspaper->FirstChildElement("circulation")->QueryIntText(&circulation);
+                        newspaper->FirstChildElement("price")->QueryFloatText(&price);
+                        
+                        t.newspapers[index] = std::tuple<int, float>(circulation, price);
+                       
+                        newspaper = newspaper->NextSiblingElement("newspaper");
+                    }
+                }
+
+                printing_houses.push_back(t);
+                printing_house = printing_house->NextSiblingElement("printing-house");
+            }
+            
+        }
+        {
+            XMLDocument doc;
+            doc.LoadFile((base/lg/po).string().c_str());
+            post_offices.clear();
+
+            auto* root = doc.FirstChildElement("post-offices");
+            auto* post_office = root->FirstChildElement("post-office");
+            while (post_office != NULL) {
+                std::string address;
+                std::string region;
+                int number {0};
+                post_office->QueryIntAttribute("number", &number);
+                auto* t_address = post_office->FirstChildElement("address")->GetText();
+                if (t_address) {address = t_address;}
+                auto* t_region = post_office->FirstChildElement("region")->GetText();
+                if (t_region) {region = t_region;}
+
+                PostOffice t = PostOffice(number, address, region);
+            
+                auto* printing_houses = post_office->FirstChildElement("printing-houses");
+                auto* printing_house = printing_houses->FirstChildElement("printing-house");
+                while (printing_house != NULL) {
+                    
+                    int id {0};
+                    int index {0};
+                    printing_house->QueryIntAttribute("id", &id);
+                    printing_house->QueryIntAttribute("index", &index);
+                    int count {0};
+                    float price {0};
+                    printing_house->FirstChildElement("count")->QueryIntText(&count);
+                    printing_house->FirstChildElement("price")->QueryFloatText(&price);
+                    std::cout << 1;
+                    t.add_order(std::tuple<int, int>(id, index), std::tuple<int, float>(count, price));
+                    printing_house = printing_house->NextSiblingElement("printing-house");
+                }
+                post_offices.push_back(t);
+                post_office = post_office->NextSiblingElement("post-office");
+            }
+        }
+}
+
+    Newspaper* get_newspaper_by_index(int indx) {
         for(int i = 0; i < this->newspapers.size(); i++) {
             if(this->newspapers[i].index == indx)
-                return this->newspapers[i];
+                return &this->newspapers[i];
         }
-        return Newspaper();
+        return nullptr;
     }
+
+    int get_location_newspaper_by_index(int indx) {
+        for(int i = 0; i < this->newspapers.size(); i++) {
+            if(this->newspapers[i].index == indx)
+                return i;
+        }
+        return -1;
+    }
+
+    PrintingHouse* get_printing_house_by_index(int id) {
+        for(int i = 0; i < this->printing_houses.size(); i++) {
+            if(this->printing_houses[i].id == id)
+                return &this->printing_houses[i];
+        }
+        return nullptr;
+    }
+
+    int get_location_printing_house_by_index(int id) {
+        for(int i = 0; i < this->printing_houses.size(); i++) {
+            if(this->printing_houses[i].id == id)
+                return i;
+        }
+        return -1;
+    }
+
+    PostOffice* get_post_office_by_index(int number) {
+        for(int i = 0; i < this->post_offices.size(); i++) {
+            if(this->post_offices[i].number == number)
+                return &this->post_offices[i];
+        }
+        return nullptr;
+    }
+
+    int get_location_post_office_by_index(int number) {
+        for(int i = 0; i < this->post_offices.size(); i++) {
+            if(this->post_offices[i].number == number)
+                return i;
+        }
+        return -1;
+    }
+
 };
 
 
@@ -385,9 +571,9 @@ public:
         connect(ui.post_office_del, &QPushButton::clicked, this, &Main::on_post_office_del);
 
         connect(ui.newspapers_per_post_office_add, &QPushButton::clicked, this, &Main::on_newspapers_per_post_office_add);
-        // connect(ui.newspapers_per_post_office_list, &QListWidget::itemClicked, this, &Main::change_newspapers_per_printing_house);
-        // connect(ui.newspapers_per_post_office_list, &QListWidget::itemDoubleClicked, this, &Main::clear_newspapers_per_printing_house_list_fields);
-        // connect(ui.newspapers_per_post_office_del, &QPushButton::clicked, this, &Main::on_newspapers_per_printing_house_del);
+        connect(ui.printing_house_per_post_office, QOverload<int>::of(&QComboBox::activated), this, &Main::update_printing_house_per_current_post_office);
+        connect(ui.newspapers_per_post_office_list, &QListWidget::itemDoubleClicked, this, &Main::clear_newspapers_per_post_office_list_fields);
+        connect(ui.newspapers_per_post_office_list, &QListWidget::itemClicked, this, &Main::change_newspapers_per_post_office_list);
 
         // select 1
         connect(ui.selection1_update, &QPushButton::clicked, this, &Main::on_selection1_update);
@@ -407,10 +593,17 @@ public:
     
     void on_load(bool) {
         bd.load_user_data(bd.cur_user);
+
+        update_newspaper_list();
+        update_post_office_list();
+        update_newspapers_per_printing_house();
+        update_printing_house_list();
+        update_printing_house_per_post_office();
+        
     }
 
     void on_change_language(bool) {
-        std::tuple<QString, QString> lan[]{{QString("rus"),QString("Русский")}, {QString("jpn"),QString("日本語")}, {QString("eng"),QString("English")}};
+        std::tuple<QString, QString> lan[3]{{QString("rus"),QString("Русский")}, {QString("jpn"),QString("日本語")}, {QString("eng"),QString("English")}};
 
         QTranslator translator;
         translator.load((bd.language_path/std::filesystem::path(std::get<0>(lan[cur_lan]).toStdString())).c_str());
@@ -420,10 +613,6 @@ public:
         ui.change_language->setText(std::get<1>(lan[cur_lan]));
         ui.cur_user->setText(bd.cur_user.c_str());
 
-        std::ofstream file_out("cur_lang");
-        file_out << cur_lan;
-        file_out.close();
-
         cur_lan+=1;
         cur_lan %= sizeof(lan)/sizeof(*lan);
     };
@@ -432,13 +621,13 @@ public:
         update_message();
 
         if(!bd.is_free_login(ui.new_login->text().toStdString())) {
-            get_massage(error, tr("The account login is busy")); return;
+            get_massage(error, QCoreApplication::translate("Main", "The account login is busy", nullptr)); return;
         }
         if(!bd.is_valid_filename(ui.new_login->text().toStdString())) {
-            get_massage(error, tr("The account login is incorrect")); return;
+            get_massage(error, QCoreApplication::translate("Main", "The account login is incorrect", nullptr)); return;
         }
         bd.user_create(ui.new_login->text().toStdString());
-        get_massage(okk, tr("Successful account creation"));
+        get_massage(okk, QCoreApplication::translate("Main", "Successful account creation", nullptr));
         ui.logins->addItem(ui.new_login->text());
         ui.new_login->clear();
 
@@ -449,11 +638,12 @@ public:
         if(ui.logins->currentText().toStdString().size()) {
         ui.cur_user->setText(ui.logins->currentText());
         bd.cur_user = ui.logins->currentText().toStdString();
-        get_massage(okk, tr("Successful account login"));
+        on_load(1);
+        get_massage(okk, QCoreApplication::translate("Main", "Successful account login", nullptr));
         work_space_enable();
         return;
         }
-        get_massage(info, tr("Access is denied"));
+        get_massage(info, QCoreApplication::translate("Main", "Access is denied", nullptr));
     }
 
     void on_del(bool) {
@@ -463,10 +653,10 @@ public:
                 ui.cur_user->setText("");
         bd.user_del(ui.logins->currentText().toStdString());
         ui.logins->removeItem(ui.logins->currentIndex());
-        get_massage(okk, tr("Successful account deletion"));
+        get_massage(okk, QCoreApplication::translate("Main", "Successful account deletion", nullptr));
         return;
         }
-        get_massage(error, tr("An empty account login field"));
+        get_massage(error, QCoreApplication::translate("Main", "An empty account login field", nullptr));
     }
 
     void on_out(bool) {
@@ -474,11 +664,11 @@ public:
         if(ui.cur_user->text().toStdString().size()) {
         ui.cur_user->setText("");
         bd.cur_user = "";
-        get_massage(okk, tr("Successful account login"));
+        get_massage(okk, QCoreApplication::translate("Main", "Successful account login", nullptr));
         work_space_disable();
         return;
         }
-        get_massage(info, tr("An empty account login field"));
+        get_massage(info, QCoreApplication::translate("Main", "An empty account login field", nullptr));
     }
 
     void get_massage(int status, const QString& massage) {
@@ -520,22 +710,24 @@ public:
     //tab newspapers
     void on_newspaper_add(bool) {
         if(ui.newspaper_title->text().isEmpty()) {
-            get_massage(error, QString(tr("Empty title of the newspaper")));
+            get_massage(error, QString(QCoreApplication::translate("Main", "Empty title of the newspaper", nullptr)));
             return;
         }
-        unsigned int indx = 0;
+        int indx = 0;
         if(bd.newspapers.size())
             indx = bd.newspapers.back().index+1;
         
         Newspaper t{ui.newspaper_title->text().toStdString(), (Newspaper::topics)ui.newspaper_topic->currentIndex(),
             indx, ui.newspaper_fio_editor->text().toStdString()};
         bd.add_newspapers(t);
-        ui.newspapers_list->addItem(ui.newspaper_title->text());
+        QListWidgetItem* tt = new QListWidgetItem(ui.newspaper_title->text());
+        tt->setData(Qt::UserRole, indx);
+        ui.newspapers_list->addItem(tt);
 
 
         clear_newspaper_fields();
         update_newspapers_per_printing_house();
-        get_massage(okk, QString(tr("Successful newspaper addition")));
+        get_massage(okk, QString(QCoreApplication::translate("Main", "Successful newspaper addition", nullptr)));
     }
 
     void change_newspaper(QListWidgetItem *item) {
@@ -551,7 +743,7 @@ public:
     void on_newspaper_save(bool) {
         int indx = ui.newspapers_list->currentRow();
         if(indx != -1 && bd.newspapers.size() > 0) {
-            if(ui.newspaper_title->text().isEmpty()) {get_massage(1, QString(tr("An empty newspaper title"))); return;}
+            if(ui.newspaper_title->text().isEmpty()) {get_massage(1, QString(QCoreApplication::translate("Main", "An empty newspaper title", nullptr))); return;}
             ui.newspapers_list->item(indx)->setText(ui.newspaper_title->text());
             bd.newspapers[indx].title = ui.newspaper_title->text().toStdString();
             bd.newspapers[indx].editor = ui.newspaper_fio_editor->text().toStdString();
@@ -583,11 +775,11 @@ public:
     //tab printing house
     void on_printing_house_add(bool) {
         if(ui.printing_house_title->text().isEmpty()) {
-            get_massage(error, QString(tr("Empty title of the printing house")));
+            get_massage(error, QString(QCoreApplication::translate("Main", "Empty title of the printing house", nullptr)));
             return;
         }
 
-        unsigned int id = 0;
+        int id = 0;
         if(bd.printing_houses.size())
             id = bd.printing_houses.back().id+1;
         
@@ -599,19 +791,25 @@ public:
         };
 
         bd.add_printing_house(t);
-        ui.printing_house_list->addItem(ui.printing_house_title->text());
+        QListWidgetItem* tt = new QListWidgetItem(ui.printing_house_title->text());
+        tt->setData(Qt::UserRole, id);
+        ui.printing_house_list->addItem(tt);
 
         clear_printing_house_fields();
-        get_massage(okk, QString(tr("Successful addition of tiprographye")));
+        get_massage(okk, QString(QCoreApplication::translate("Main", "Successful addition of tiprographye", nullptr)));
     }
 
     void change_printing_house(QListWidgetItem *item) {
-        int indx = ui.printing_house_list->currentRow();
-        if(indx != -1 && bd.printing_houses.size() > 0) {
-            ui.printing_house_title->setText(QString(bd.printing_houses[indx].title.c_str()));
-            ui.printing_house_address->setText(QString(bd.printing_houses[indx].address.c_str()));
-            ui.printing_house_boss->setText(QString(bd.printing_houses[indx].boss.c_str()));
-            update_newspapers_list_by_printing_house(indx);
+        if(ui.printing_house_list->currentRow()==-1) return;
+        auto* order = bd.get_printing_house_by_index(ui.printing_house_list->currentItem()->data(Qt::UserRole).toInt());
+        if(bd.printing_houses.size() > 0) {
+            ui.printing_house_title->setText(QString(order->title.c_str()));
+            ui.printing_house_address->setText(QString(order->address.c_str()));
+            ui.printing_house_boss->setText(QString(order->boss.c_str()));
+            
+            update_newspapers_list_by_printing_house(bd.get_location_printing_house_by_index(order->id));
+            
+            
             clear_newspapers_per_printing_house_list_fields();
         }
     }
@@ -623,23 +821,25 @@ public:
     }
 
     void on_printing_house_save(bool) {
-        int indx = ui.printing_house_list->currentRow();
-        if(indx != -1 && bd.printing_houses.size() > 0) {
-        if(ui.printing_house_title->text().isEmpty()) {get_massage(1, QString(tr("Empty title of the printing house"))); return;}
-        ui.printing_house_list->item(indx)->setText(ui.printing_house_title->text());
-        bd.printing_houses[indx].title = ui.printing_house_title->text().toStdString();
-        bd.printing_houses[indx].address = ui.printing_house_address->text().toStdString();
-        bd.printing_houses[indx].boss = ui.printing_house_boss->text().toStdString();
+        if(ui.printing_house_list->currentRow() == -1) return; 
+        auto order = bd.get_printing_house_by_index(ui.printing_house_list->currentItem()->data(Qt::UserRole).value<int>());
+        if(order && bd.printing_houses.size() > 0) {
+        if(ui.printing_house_title->text().isEmpty()) {get_massage(1, QString(QCoreApplication::translate("Main", "Empty title of the printing house", nullptr))); return;}
+        ui.printing_house_list->item(bd.get_location_printing_house_by_index(order->id))->setText(ui.printing_house_title->text());
+        order->title = ui.printing_house_title->text().toStdString();
+        order->address = ui.printing_house_address->text().toStdString();
+        order->boss = ui.printing_house_boss->text().toStdString();
         clear_printing_house_fields();
         }
     }
-
 // Удаление элементов из массива газет нужно реализовать
     void on_printing_house_del(bool) {
-        int indx = ui.printing_house_list->currentRow();
-        if(indx != -1 && bd.printing_houses.size() > 0) {
-            bd.del_printing_house(indx);
-            QListWidgetItem* item = ui.printing_house_list->takeItem(indx);
+        if(ui.printing_house_list->currentRow() == -1) return; 
+        auto* order = bd.get_printing_house_by_index(ui.printing_house_list->currentItem()->data(Qt::UserRole).toInt());
+        if(order && bd.printing_houses.size() > 0) {
+            int id = bd.get_location_printing_house_by_index(order->id);
+            bd.del_printing_house(id);
+            QListWidgetItem* item = ui.printing_house_list->takeItem(id);
             if (item) delete item;
 
             clear_printing_house_fields();
@@ -649,85 +849,90 @@ public:
 
     // block with newspapers
     void on_newspapers_per_printing_house_add() {
-        int indx = ui.printing_house_list->currentRow();
-        if(!(indx != -1 && bd.printing_houses.size() > 0)) {
-            get_massage(error, QString(tr("Printing house is not selected")));
+  
+        if(!(ui.printing_house_list->currentRow() != -1 && bd.printing_houses.size() > 0)) {
+            get_massage(error, QString(QCoreApplication::translate("Main", "Printing house is not selected", nullptr)));
             return;
         }
         if(!bd.newspapers.size()) {
-            get_massage(error, QString(tr("There are no newspapers")));
+            get_massage(error, QString(QCoreApplication::translate("Main", "There are no newspapers", nullptr)));
             return; 
         }
 
-       
-        QListWidgetItem *item = new QListWidgetItem(bd.newspapers[ui.newspapers_per_printing_house->currentIndex()].title.c_str());
-        item->setData(Qt::UserRole, bd.newspapers[ui.newspapers_per_printing_house->currentIndex()].index);
-        // item->setData(Qt::UserRole+1, bd.newspapers[ui.newspapers_per_printing_house->currentIndex()].title);
-        if(bd.printing_houses[indx].newspapers.count(bd.newspapers[ui.newspapers_per_printing_house->currentIndex()].index) == 0)
+        auto* order = bd.get_printing_house_by_index(ui.printing_house_list->currentItem()->data(Qt::UserRole).toInt());
+        int index = ui.newspapers_per_printing_house->currentData().toInt();
+
+        QListWidgetItem *item = new QListWidgetItem(bd.get_newspaper_by_index(index)->title.c_str());
+
+        item->setData(Qt::UserRole, order->id);
+        item->setData(Qt::UserRole+1, index);
+
+        if(order->newspapers.count(index) == 0)
         ui.newspapers_per_printing_house_list->addItem(item);
 
 
-        std::tuple<unsigned int, unsigned int> circulation_and_price{ui.newspapers_count_per_printing_house->value(),ui.newspapers_price_per_printing_house->value()};
-        bd.printing_houses[indx].add_newspaper(
-            bd.newspapers[ui.newspapers_per_printing_house->currentIndex()].index,
+        std::tuple<int, float> circulation_and_price{ui.newspapers_count_per_printing_house->value(),ui.newspapers_price_per_printing_house->value()};
+        order->add_newspaper(
+            index,
             circulation_and_price
         );
 
         clear_newspapers_per_printing_house_list_fields();
-        get_massage(okk, QString(tr("Successful addition of the newspaper to the printing house")));
+        get_massage(okk, QString(QCoreApplication::translate("Main", "Successful addition of the newspaper to the printing house", nullptr)));
     }
 
     void clear_newspapers_per_printing_house_list_fields() {
-        ui.newspapers_per_printing_house->setCurrentIndex(0);
+        ui.newspapers_per_printing_house->setCurrentIndex(-1);
         ui.newspapers_count_per_printing_house->setValue(0);
         ui.newspapers_price_per_printing_house->setValue(0);
     }
    
     void change_newspapers_per_printing_house(QListWidgetItem *item) {
-        unsigned int indx2 = item->data(Qt::UserRole).value<unsigned int>();
-        
-        int indx = ui.printing_house_list->currentRow();
-        
-        auto data = bd.printing_houses[indx].newspapers[indx2];
+        int indx = item->data(Qt::UserRole).toInt();
+        int indx2 = item->data(Qt::UserRole+1).toInt();
+        auto data = bd.get_printing_house_by_index(indx)->newspapers[indx2];
         ui.newspapers_count_per_printing_house->setValue(std::get<0>(data));
         ui.newspapers_price_per_printing_house->setValue(std::get<1>(data));
-        
-        ui.newspapers_per_printing_house->setCurrentIndex(indx2);
+        ui.newspapers_per_printing_house->setCurrentIndex(bd.get_location_newspaper_by_index(indx2));
 
     }
 
     void on_newspapers_per_printing_house_del() {
-        int indx = ui.printing_house_list->currentRow();
-        if(!(indx != -1 && bd.printing_houses.size() > 0)) {
-            get_massage(error, QString(tr("Printing house is not selected")));
+        if(ui.printing_house_list->currentRow() == -1) return; 
+
+        if(!(bd.printing_houses.size() > 0)) {
+            get_massage(error, QString(QCoreApplication::translate("Main", "Printing house is not selected", nullptr)));
             return;
         }
         if(!bd.newspapers.size()) {
-            get_massage(error, QString(tr("There are no newspapers")));
+            get_massage(error, QString(QCoreApplication::translate("Main", "There are no newspapers", nullptr)));
             return; 
         }
 
         int indx2 = ui.newspapers_per_printing_house_list->currentRow();
         if(indx2 == -1) {
-            get_massage(error, QString(tr("Newspaper NOT selected")));
+            get_massage(error, QString(QCoreApplication::translate("Main", "Newspaper NOT selected", nullptr)));
             return; 
         }
 
-        bd.printing_houses[indx].del_newspaper(ui.newspapers_per_printing_house_list->currentItem()->data(Qt::UserRole).value<unsigned int>());
-        QListWidgetItem* item = ui.newspapers_per_printing_house_list->takeItem(indx);
+        int id = ui.newspapers_per_printing_house_list->currentItem()->data(Qt::UserRole).toInt();
+        int index = ui.newspapers_per_printing_house_list->currentItem()->data(Qt::UserRole+1).value<int>();
+
+        bd.get_printing_house_by_index(id)->del_newspaper(index);
+        QListWidgetItem* item = ui.newspapers_per_printing_house_list->takeItem(ui.printing_house_list->currentRow());
         if (item) delete item;
         clear_newspapers_per_printing_house_list_fields();
-        update_newspapers_list_by_printing_house(indx);
-        std::cout << bd.printing_houses[indx].newspapers.size();
+        update_newspapers_list_by_printing_house(bd.get_location_printing_house_by_index(id));
         return ;
     }
-// вывод элементов массива вместо "---"
+
     void update_newspapers_list_by_printing_house(int indx) {
         ui.newspapers_per_printing_house_list->clear();
 
         for (const auto& [indx2, value] : bd.printing_houses[indx].newspapers) {
-            QListWidgetItem *item = new QListWidgetItem("--------");
-            item->setData(Qt::UserRole, indx2);
+            QListWidgetItem *item = new QListWidgetItem(bd.get_newspaper_by_index(indx2)->title.c_str());
+            item->setData(Qt::UserRole, bd.printing_houses[indx].id);
+            item->setData(Qt::UserRole+1, indx2);
             ui.newspapers_per_printing_house_list->addItem(item);
         }
     }
@@ -735,31 +940,35 @@ public:
     //post office
     void on_post_office_add(bool) {
         if(!ui.post_office_number->value()) {
-            get_massage(error, QString(tr("An empty post office number")));
+            get_massage(error, QString(QCoreApplication::translate("Main", "An empty post office number", nullptr)));
             return;
         }
         PostOffice t{
-            (unsigned int)ui.post_office_number->value(), 
+            ui.post_office_number->value(), 
             ui.post_office_address->text().toStdString(), 
             ui.post_office_region->text().toStdString()
         };
-
+        
         bd.add_post_office(t);
-        ui.post_office_list->addItem(QString(tr("Post Office №")) + QString::number(ui.post_office_number->value(), 16, 0));
+        QListWidgetItem* tt = new QListWidgetItem(QString(QCoreApplication::translate("Main", "Post Office №")) + QString::number(ui.post_office_number->value(), 16, 0));
+        tt->setData(Qt::UserRole, t.number);
+        ui.post_office_list->addItem(tt);
 
         clear_post_office_fields();
-        get_massage(okk, QString(tr("Successful addition of a post office")));
+        get_massage(okk, QString(QCoreApplication::translate("Main", "Successful addition of a post office", nullptr)));
     }
     
     void change_post_office(QListWidgetItem *item) {
-        int indx = ui.post_office_list->currentRow();
+        int indx = ui.post_office_list->currentItem()->data(Qt::UserRole).value<int>();
+
+        auto* order = bd.get_post_office_by_index(indx);
         if(indx != -1 && bd.post_offices.size() > 0) {
-            ui.post_office_number->setValue(bd.post_offices[indx].number);
-            ui.post_office_address->setText(QString(bd.post_offices[indx].address.c_str()));
-            ui.post_office_region->setText(QString(bd.post_offices[indx].region.c_str()));
+            ui.post_office_number->setValue(order->number);
+            ui.post_office_address->setText(order->address.c_str());
+            ui.post_office_region->setText(order->region.c_str());
             ui.post_office_number->setEnabled(false);
-            // update_newspapers_list_by_printing_house(indx);
-            // clear_newspapers_per_printing_house_list_fields();
+
+            update_newspapers_per_post_office_list(bd.get_location_post_office_by_index(order->number));
         }
     }
     
@@ -770,8 +979,90 @@ public:
         ui.post_office_region->setText("");
     }
 
-    void on_newspapers_per_post_office_add() {}
+    void on_newspapers_per_post_office_add() {
+        int indx = ui.post_office_list->currentRow();
+        if(!(indx != -1 && bd.post_offices.size() > 0)) {
+            get_massage(error, QString(QCoreApplication::translate("Main", "Post Office is not selected", nullptr)));
+            return;
+        }
+        if(ui.printing_house_per_post_office->currentIndex() == -1) {
+            get_massage(error, QString(QCoreApplication::translate("Main", "Not selected Printing House", nullptr)));
+            return; 
+        }
+        if(ui.newspaper_per_post_office->currentIndex() == -1) {
+            get_massage(error, QString(QCoreApplication::translate("Main", "Not selected Newspaper of this Printing House", nullptr)));
+            return; 
+        }
+
+        int number = ui.post_office_list->currentItem()->data(Qt::UserRole).toInt();
+        int id = ui.printing_house_per_post_office->currentData().toInt();
+        int index = ui.newspaper_per_post_office->currentData().toInt();
+        std::tuple<int, int> ID_PrintingHouse_IndexNewspaper{id, index};
+
+        QListWidgetItem *item = new QListWidgetItem(ui.printing_house_per_post_office->currentText() + " > " + ui.newspaper_per_post_office->currentText());
+        item->setData(Qt::UserRole, id);
+        item->setData(Qt::UserRole+1, index);
+
+        if(bd.post_offices[indx].printing_houses.count(ID_PrintingHouse_IndexNewspaper) == 0)
+        ui.newspapers_per_post_office_list->addItem(item);
+
+
+        std::tuple<int, float> count_and_price{ui.newspapers_per_post_office_count->value(),ui.newspapers_per_post_office_price->value()};
+        bd.post_offices[indx].add_order(
+            ID_PrintingHouse_IndexNewspaper, 
+            count_and_price
+        );
+
+        clear_newspapers_per_post_office_list_fields();
+        get_massage(okk, QString(QCoreApplication::translate("Main", "Successful addition of the order to the Post Office", nullptr)));
+    }
+
+    void clear_newspapers_per_post_office_list_fields() {
+        ui.newspapers_per_post_office_count->setValue(0);
+        ui.newspapers_per_post_office_price->setValue(0);
+        ui.printing_house_per_post_office->setCurrentIndex(-1);
+        ui.newspaper_per_post_office->setCurrentIndex(-1);
+    }
     
+    void change_newspapers_per_post_office_list(QListWidgetItem *item) {
+        int id = item->data(Qt::UserRole).value<int>();
+        int index = item->data(Qt::UserRole+1).value<int>();
+        int indx = ui.post_office_list->currentItem()->data(Qt::UserRole).value<int>();
+
+        auto data = bd.get_post_office_by_index(indx)->printing_houses[std::tuple<int, int>(id, index)];
+        ui.newspapers_per_post_office_count->setValue(std::get<0>(data));
+        ui.newspapers_per_post_office_price->setValue(std::get<1>(data));
+
+        
+        update_printing_house_per_post_office();
+        update_printing_house_per_current_post_office(ui.printing_house_per_post_office->currentIndex());
+     
+        
+        ui.printing_house_per_post_office->setCurrentIndex(bd.get_location_printing_house_by_index(id));
+        ui.newspaper_per_post_office->setCurrentIndex(bd.get_location_newspaper_by_index(index));
+  
+  
+    }
+
+    void update_newspapers_per_post_office_list(int number) {
+        ui.newspapers_per_post_office_list->clear();
+
+        auto order = &bd.post_offices[number];
+
+        for (const auto& [indx2, value] : order->printing_houses) {
+            // std::map<std::tuple<int, int>, std::tuple<int, float>>
+            auto printing_house = bd.get_printing_house_by_index(std::get<0>(indx2));
+            auto newspaper = bd.get_newspaper_by_index(std::get<1>(indx2));
+            
+            QListWidgetItem *item = new QListWidgetItem(QString(printing_house->title.c_str()) + " > " + QString(newspaper->title.c_str()) );
+    
+            item->setData(Qt::UserRole, printing_house->id);
+            item->setData(Qt::UserRole+1, newspaper->index);
+            ui.newspapers_per_post_office_list->addItem(item);
+
+        }
+
+    }
 
 // Реализвать удаление списка типографий, которые подвязанны к этому офису
     void on_post_office_del() {
@@ -796,11 +1087,18 @@ public:
     //select 1 2 3
     void on_selection1_update(bool) {
         ui.selection1_table->clear();
-        auto indx = ui.selection1->itemData(ui.selection1->currentIndex()).value<unsigned int>();
-        // if(!bd.printing_houses.size() || indx==-1)selection1_update();
+        auto indx = ui.selection1->itemData(ui.selection1->currentIndex()).value<int>();
         if(bd.printing_houses.size() && indx!=-1) {
-            std::vector<QString> head = {{tr("Subscription index")}, {tr("Title of Newspaper")}, {tr("Topic")}, {tr("Editor")}, {tr("Circulation")}, {tr("Price")}};
-            ui.selection1_table->setRowCount(bd.printing_houses[indx].newspapers.size()+1);
+            std::vector<QString> head = {
+                {QCoreApplication::translate("Main", "Subscription index", nullptr)},
+                {QCoreApplication::translate("Main", "Title of Newspaper", nullptr)},
+                {QCoreApplication::translate("Main", "Topic", nullptr)},
+                {QCoreApplication::translate("Main", "Editor", nullptr)},
+                {QCoreApplication::translate("Main", "Circulation", nullptr)},
+                {QCoreApplication::translate("Main", "Price", nullptr)}};
+
+            auto order_bd = bd.get_printing_house_by_index(indx);
+            ui.selection1_table->setRowCount(order_bd->newspapers.size()+1);
             ui.selection1_table->setColumnCount(head.size());
             ui.selection1_table->horizontalHeader()->setVisible(false);
             ui.selection1_table->verticalHeader()->setVisible(false);
@@ -814,8 +1112,8 @@ public:
             }
 
             int order{1};
-            for(auto& [key, value] : bd.printing_houses[indx].newspapers) {
-                auto ord = bd.get_newspaper_by_index(key);
+            for(auto& [key, value] : order_bd->newspapers) {
+                auto ord = *bd.get_newspaper_by_index(key);
                 QTableWidgetItem* t0 = new QTableWidgetItem();
                 t0->setText(QString::number(ord.index, 10, 0));
                 t0->setFlags(t0->flags() & ~Qt::ItemIsEditable);
@@ -845,6 +1143,7 @@ public:
         }
         
     }
+    
     void on_selection1_save(bool) {
         size_t M = ui.selection1_table->rowCount();
         size_t N = ui.selection1_table->columnCount();
@@ -862,10 +1161,15 @@ public:
 
     void on_selection2_update(bool) {
         ui.selection2_table->clear();
-        auto indx = ui.selection2->itemData(ui.selection2->currentIndex()).value<unsigned int>();
+        auto indx = ui.selection2->itemData(ui.selection2->currentIndex()).value<int>();
         
         if(bd.printing_houses.size() && indx!=-1) {
-            std::vector<QString> head = {{tr("Title Of Printing House")}, {tr("Address")}, {tr("Director")}, {tr("Circulation")}, {tr("Price")}};
+            std::vector<QString> head = {
+                {QCoreApplication::translate("Main", "Title Of Printing House", nullptr)},
+                {QCoreApplication::translate("Main", "Address", nullptr)},
+                {QCoreApplication::translate("Main", "Director", nullptr)},
+                {QCoreApplication::translate("Main", "Circulation", nullptr)},
+                {QCoreApplication::translate("Main", "Price", nullptr)}};
             ui.selection2_table->setRowCount(1);
             ui.selection2_table->setColumnCount(head.size());
             ui.selection2_table->horizontalHeader()->setVisible(false);
@@ -909,6 +1213,7 @@ public:
             }
         }
     }
+    
     void on_selection2_save(bool) {
         size_t M = ui.selection2_table->rowCount();
         size_t N = ui.selection2_table->columnCount();
@@ -926,16 +1231,21 @@ public:
 
     void on_selection3_update(bool) {
         ui.selection3_table->clear();
-        auto indx = ui.selection3->itemData(ui.selection3->currentIndex()).value<unsigned int>();
+        auto indx = ui.selection3->itemData(ui.selection3->currentIndex()).value<int>();
         
         if(bd.printing_houses.size() && indx!=-1) {
-            std::vector<QString> head = {{tr("Title Of Printing House")}, {tr("Address")}, {tr("Director")}, {tr("Circulation")}, {tr("Price")}};
+            std::vector<QString> head = {
+                {QCoreApplication::translate("Main", "Title Of Printing House", nullptr)},
+                {QCoreApplication::translate("Main", "Address", nullptr)}, 
+                {QCoreApplication::translate("Main", "Director", nullptr)}, 
+                {QCoreApplication::translate("Main", "Circulation", nullptr)}, 
+                {QCoreApplication::translate("Main", "Price", nullptr)}};
             ui.selection3_table->setRowCount(1);
             ui.selection3_table->setColumnCount(head.size());
             ui.selection3_table->horizontalHeader()->setVisible(false);
             ui.selection3_table->verticalHeader()->setVisible(false);
             
-            long double total_cost{0.0};
+            float total_cost{0.0};
 
             for(int i = 0; i < head.size(); i++) {
                 ui.selection3_table->horizontalHeader()->setSectionResizeMode(i, QHeaderView::Stretch);
@@ -975,6 +1285,7 @@ public:
             ui.total_cost->setText(QString::number(total_cost, 10, 2));
         }
     }
+    
     void on_selection3_save(bool) {
         size_t M = ui.selection3_table->rowCount();
         size_t N = ui.selection3_table->columnCount();
@@ -1027,14 +1338,62 @@ public:
             ui.spaces->setTabEnabled(i,false);
     }
 
+
+    // update element's content
+    void update_newspaper_list() {
+        ui.newspapers_list->clear();
+        for(int i = 0; i < bd.newspapers.size(); i++) {
+            QListWidgetItem* tt = new QListWidgetItem(bd.newspapers[i].title.c_str());
+            tt->setData(Qt::UserRole, bd.newspapers[i].index);
+            ui.newspapers_list->addItem(tt);
+        }
+    }
+
     void update_newspapers_per_printing_house() {
         ui.newspapers_per_printing_house->clear();
-        for(int i=0; i < bd.newspapers.size(); i++)
-            ui.newspapers_per_printing_house->addItem(QString(bd.newspapers[i].title.c_str()));
-    };
+        for(int i = 0; i < bd.newspapers.size(); i++) {
+            ui.newspapers_per_printing_house->addItem(bd.newspapers[i].title.c_str(), bd.newspapers[i].index);
+        }
+    }
+
+    void update_printing_house_per_post_office() {
+        ui.printing_house_per_post_office->clear();
+        for(int i = 0; i < bd.printing_houses.size(); i++) {
+            ui.printing_house_per_post_office->addItem(bd.printing_houses[i].title.c_str(), bd.printing_houses[i].id);
+        }
+    }
+
+    void update_printing_house_per_current_post_office(int id) {
+        ui.newspaper_per_post_office->clear();
+        auto indx1 = ui.printing_house_per_post_office->itemData(id).value<int>();
+
+        for(const auto& [i, value] : bd.get_printing_house_by_index(indx1)->newspapers) {
+            Newspaper* t = bd.get_newspaper_by_index(i);
+            ui.newspaper_per_post_office->addItem(QString(t->title.c_str()), t->index);
+        }
+        
+
+    }
+
+
+    void update_printing_house_list() {
+        ui.printing_house_list->clear();
+        for(int i = 0; i < bd.printing_houses.size(); i++) {
+            QListWidgetItem* tt = new QListWidgetItem(bd.printing_houses[i].title.c_str());
+            tt->setData(Qt::UserRole, bd.printing_houses[i].id);
+            ui.printing_house_list->addItem(tt);
+        }
+    }
+
+    void update_post_office_list() {
+        ui.post_office_list->clear();
+        for(int i = 0; i < bd.post_offices.size(); i++) {
+            QListWidgetItem* tt = new QListWidgetItem(QString(QCoreApplication::translate("Main", "Post Office №")) + QString::number(bd.post_offices[i].number,10,0));
+            tt->setData(Qt::UserRole, bd.post_offices[i].number);
+            ui.post_office_list->addItem(tt);
+        }
+    }
 };
-
-
 
 
 int main(int argc, char *argv[]) {
@@ -1043,21 +1402,11 @@ int main(int argc, char *argv[]) {
     BD bd;
     bd.load();
 
+    QTranslator translator;
+    translator.load("rus");
+    app.installTranslator(&translator);
+
     Main widget(bd);
-
-    
-
-    //load languge
-    // int cur{0};
-    // std::ifstream file_out("cur_lang");
-    // file_out >> cur;
-    // file_out.close();
-    // QTranslator translator;
-
-    // translator.load(QString((bd.language_path/std::filesystem::path(std::get<0>(widget.lan[cur]))).toStdString()));
-    // QApplication::installTranslator(&translator);
-    
-    
     widget.show();
     return app.exec();
 }
