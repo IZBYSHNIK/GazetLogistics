@@ -1384,7 +1384,7 @@ public:
         total_cost = new QLineEdit(select3);
         total_cost->setObjectName(QString::fromUtf8("total_cost"));
         total_cost->setEnabled(false);
-        total_cost->setMaximumSize(QSize(80, 16777215));
+        total_cost->setMaximumSize(QSize(200, 16777215));
         total_cost->setFont(font4);
 
         horizontalLayout_24->addWidget(total_cost);

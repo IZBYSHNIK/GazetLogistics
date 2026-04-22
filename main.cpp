@@ -28,7 +28,6 @@
 #include <tuple>
 #include <filesystem>
 #include <tinyxml2.h>
-#include <toml++/toml.hpp>
 
 using namespace tinyxml2;
 
@@ -95,12 +94,12 @@ class PostOffice {
 
     PostOffice() {};
     PostOffice(int number, const std::string& address, const std::string& region) : number{number}, address{address}, region{region} {};
-    bool add_order(std::tuple<int, int> IDPrintingHouse_IndexNewspaper, std::tuple<int, float> count_and_price) {
+    bool add_order(const std::tuple<int, int>& IDPrintingHouse_IndexNewspaper, const std::tuple<int, float>& count_and_price) {
         printing_houses[IDPrintingHouse_IndexNewspaper] = count_and_price;
         return 0;
     }
     
-    bool del_newspaper(std::tuple<int, int> index) {
+    bool del_order(const std::tuple<int, int>& index) {
         printing_houses.erase(index);
         return 0;
     }
@@ -197,19 +196,73 @@ class BD {
         return 0;
     }
 
+    bool del_printing_house(int id) {
+        // id not for vector, index from Newspaper's id
+        int pos = -1;
+        for(int i = 0; i < printing_houses.size(); i++) {
+            if(printing_houses[i].id == id) {
+                pos = i;
+                break;
+            }
+        }
+        if(pos == -1) return false;
+        
+       
+        for(int i = 0; i < post_offices.size(); i++) {
+            std::vector<std::tuple<int, int>> delete_items;
+            for(auto& [key, value] : post_offices[i].printing_houses)
+                if(std::get<0>(key) == id) {
+                    delete_items.push_back(key);
+                   
+                }
+            for(const auto& key : delete_items)
+                post_offices[i].del_order(key);
+        }
+
+        auto it = printing_houses.begin() + pos; 
+        printing_houses.erase(it);
+        return true;
+    }
+
     bool del_newspapers(int indx) {
         // indx for vector, index not from Newspaper
-        auto it = newspapers.begin() + indx; 
+        int pos = -1;
+        for(int i = 0; i < printing_houses.size(); i++) {
+            if(newspapers[i].index == indx) {
+                pos = i;
+                break;
+            }
+        }
+        if(pos == -1) return false;
+
+        for(int i = 0; i < post_offices.size(); i++) {
+            std::vector<std::tuple<int, int>> delete_items;
+            for(auto& [key, value] : post_offices[i].printing_houses)
+                if(std::get<1>(key) == indx) {
+                    delete_items.push_back(key);
+                   
+                }
+            for(const auto& key : delete_items)
+                post_offices[i].del_order(key);
+        }
+
+        for(int i = 0; i < printing_houses.size(); i++) {
+            std::vector<int> delete_items;
+            for(auto& [key, value] : printing_houses[i].newspapers)
+                if(key == indx) {
+                    delete_items.push_back(key);
+                   
+                }
+            for(const auto& key : delete_items)
+                printing_houses[i].del_newspaper(key);
+        }
+
+
+        auto it = newspapers.begin() + pos; 
         newspapers.erase(it);
         return 0;
     }
 
-    bool del_printing_house(int indx) {
-        // indx for vector, index not from Newspaper
-        auto it = printing_houses.begin() + indx; 
-        printing_houses.erase(it);
-        return 0;
-    }
 
     void save_user_data(const std::string& user) {
         std::filesystem::path lg{user};
@@ -510,14 +563,11 @@ class BD {
 
 };
 
-
-
 class Main : public QMainWindow {
     enum StatusMassage{okk, info, error};
     Ui::MainWindow ui;
     BD bd;
     unsigned char cur_lan{0};
-    
     
 public:
 
@@ -569,7 +619,6 @@ public:
         connect(ui.post_office_list, &QListWidget::itemDoubleClicked, this, &Main::clear_post_office_fields);
         connect(ui.post_office_save, &QPushButton::clicked, this, &Main::on_post_office_save);
         connect(ui.post_office_del, &QPushButton::clicked, this, &Main::on_post_office_del);
-
         connect(ui.newspapers_per_post_office_add, &QPushButton::clicked, this, &Main::on_newspapers_per_post_office_add);
         connect(ui.printing_house_per_post_office, QOverload<int>::of(&QComboBox::activated), this, &Main::update_printing_house_per_current_post_office);
         connect(ui.newspapers_per_post_office_list, &QListWidget::itemDoubleClicked, this, &Main::clear_newspapers_per_post_office_list_fields);
@@ -603,18 +652,21 @@ public:
     }
 
     void on_change_language(bool) {
-        std::tuple<QString, QString> lan[3]{{QString("rus"),QString("Русский")}, {QString("jpn"),QString("日本語")}, {QString("eng"),QString("English")}};
-
+        QString langs[3]{QString("rus"), QString("jpn"), QString("eng")};
         QTranslator translator;
-        translator.load((bd.language_path/std::filesystem::path(std::get<0>(lan[cur_lan]).toStdString())).c_str());
+        std::filesystem::path lang_path{std::filesystem::path(langs[cur_lan].toStdString())};
+        translator.load((bd.language_path/lang_path).c_str());
         QApplication::installTranslator(&translator);
         ui.retranslateUi(this);
 
-        ui.change_language->setText(std::get<1>(lan[cur_lan]));
-        ui.cur_user->setText(bd.cur_user.c_str());
+
+        std::ofstream out(bd.language_path/std::filesystem::path("language.ini"));
+        if (out.is_open())
+        out << lang_path.c_str(); 
+        out.close();
 
         cur_lan+=1;
-        cur_lan %= sizeof(lan)/sizeof(*lan);
+        cur_lan %= 3;
     };
  
     void on_user_create(bool) {
@@ -634,6 +686,7 @@ public:
     }
 
     void on_in(bool) {
+        on_out(true);
         update_message();
         if(ui.logins->currentText().toStdString().size()) {
         ui.cur_user->setText(ui.logins->currentText());
@@ -761,10 +814,10 @@ public:
     }
 
     void on_newspaper_del(bool) {
-        int indx = ui.newspapers_list->currentRow();
-        if(indx != -1 && bd.newspapers.size() > 0) {
+        int indx = ui.newspapers_list->currentItem()->data(Qt::UserRole).toInt();
+        if(ui.newspapers_list->currentRow() != -1 && bd.newspapers.size() > 0) {
             bd.del_newspapers(indx);
-            QListWidgetItem* item = ui.newspapers_list->takeItem(indx);
+            QListWidgetItem* item = ui.newspapers_list->takeItem(ui.newspapers_list->currentRow());
             if (item) delete item;
             clear_newspaper_fields();
             update_newspapers_per_printing_house();
@@ -818,6 +871,7 @@ public:
         ui.printing_house_title->setText("");
         ui.printing_house_address->setText("");
         ui.printing_house_boss->setText("");
+        ui.newspapers_per_printing_house_list->clear();
     }
 
     void on_printing_house_save(bool) {
@@ -832,14 +886,14 @@ public:
         clear_printing_house_fields();
         }
     }
-// Удаление элементов из массива газет нужно реализовать
+
     void on_printing_house_del(bool) {
         if(ui.printing_house_list->currentRow() == -1) return; 
         auto* order = bd.get_printing_house_by_index(ui.printing_house_list->currentItem()->data(Qt::UserRole).toInt());
         if(order && bd.printing_houses.size() > 0) {
-            int id = bd.get_location_printing_house_by_index(order->id);
-            bd.del_printing_house(id);
-            QListWidgetItem* item = ui.printing_house_list->takeItem(id);
+            // int id = bd.get_location_printing_house_by_index();
+            bd.del_printing_house(order->id);
+            QListWidgetItem* item = ui.printing_house_list->takeItem(ui.printing_house_list->currentRow());
             if (item) delete item;
 
             clear_printing_house_fields();
@@ -919,6 +973,18 @@ public:
         int index = ui.newspapers_per_printing_house_list->currentItem()->data(Qt::UserRole+1).value<int>();
 
         bd.get_printing_house_by_index(id)->del_newspaper(index);
+
+        for(int i = 0; i < bd.post_offices.size(); i++) {
+            std::vector<std::tuple<int, int>> delete_items;
+            for(auto& [key, value] : bd.post_offices[i].printing_houses)
+                if(std::get<1>(key) == index) {
+                    delete_items.push_back(key);
+                   
+                }
+            for(const auto& key : delete_items)
+                bd.post_offices[i].del_order(key);
+        }
+
         QListWidgetItem* item = ui.newspapers_per_printing_house_list->takeItem(ui.printing_house_list->currentRow());
         if (item) delete item;
         clear_newspapers_per_printing_house_list_fields();
@@ -962,7 +1028,7 @@ public:
         int indx = ui.post_office_list->currentItem()->data(Qt::UserRole).value<int>();
 
         auto* order = bd.get_post_office_by_index(indx);
-        if(indx != -1 && bd.post_offices.size() > 0) {
+        if(order && indx != -1 && bd.post_offices.size() > 0) {
             ui.post_office_number->setValue(order->number);
             ui.post_office_address->setText(order->address.c_str());
             ui.post_office_region->setText(order->region.c_str());
@@ -977,6 +1043,7 @@ public:
         ui.post_office_number->setValue(0);
         ui.post_office_address->setText("");
         ui.post_office_region->setText("");
+        ui.newspapers_per_post_office_list->clear();
     }
 
     void on_newspapers_per_post_office_add() {
@@ -1064,7 +1131,7 @@ public:
 
     }
 
-// Реализвать удаление списка типографий, которые подвязанны к этому офису
+
     void on_post_office_del() {
         int indx = ui.post_office_list->currentRow();
         if(indx != -1 && bd.post_offices.size() > 0) {
@@ -1322,7 +1389,6 @@ public:
         }
     }
 
-
     //etc
     void work_space_enable() {
         ui.save->setEnabled(true);
@@ -1337,7 +1403,6 @@ public:
         for(int i = 1; i < ui.spaces->count(); i++)
             ui.spaces->setTabEnabled(i,false);
     }
-
 
     // update element's content
     void update_newspaper_list() {
@@ -1375,7 +1440,6 @@ public:
 
     }
 
-
     void update_printing_house_list() {
         ui.printing_house_list->clear();
         for(int i = 0; i < bd.printing_houses.size(); i++) {
@@ -1402,8 +1466,22 @@ int main(int argc, char *argv[]) {
     BD bd;
     bd.load();
 
+    std::filesystem::path lang_path{bd.language_path/std::filesystem::path("language.ini")};
+    std::filesystem::path lang{};
+    if(!std::filesystem::exists(lang_path)) {
+           std::ofstream out(lang_path);
+            if (out.is_open())
+            out << "eng"; 
+            out.close();
+        };
+    
+    std::ifstream input(lang_path);
+    if (input.is_open())
+    input >> lang; 
+    input.close();
+
     QTranslator translator;
-    translator.load("rus");
+    translator.load((bd.language_path/lang).c_str());
     app.installTranslator(&translator);
 
     Main widget(bd);
