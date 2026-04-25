@@ -503,7 +503,6 @@ class BD {
                     float price {0};
                     printing_house->FirstChildElement("count")->QueryIntText(&count);
                     printing_house->FirstChildElement("price")->QueryFloatText(&price);
-                    std::cout << 1;
                     t.add_order(std::tuple<int, int>(id, index), std::tuple<int, float>(count, price));
                     printing_house = printing_house->NextSiblingElement("printing-house");
                 }
@@ -623,6 +622,7 @@ public:
         connect(ui.printing_house_per_post_office, QOverload<int>::of(&QComboBox::activated), this, &Main::update_printing_house_per_current_post_office);
         connect(ui.newspapers_per_post_office_list, &QListWidget::itemDoubleClicked, this, &Main::clear_newspapers_per_post_office_list_fields);
         connect(ui.newspapers_per_post_office_list, &QListWidget::itemClicked, this, &Main::change_newspapers_per_post_office_list);
+        connect(ui.newspapers_per_post_office_del, &QPushButton::clicked, this, &Main::on_newspapers_per_post_office_del);
 
         // select 1
         connect(ui.selection1_update, &QPushButton::clicked, this, &Main::on_selection1_update);
@@ -1135,7 +1135,7 @@ public:
     void on_post_office_del() {
         int indx = ui.post_office_list->currentRow();
         if(indx != -1 && bd.post_offices.size() > 0) {
-            bd.del_post_office(indx);
+            bd.del_post_office(bd.get_location_post_office_by_index(ui.post_office_list->currentItem()->data(Qt::UserRole).toInt()));
             QListWidgetItem* item = ui.post_office_list->takeItem(indx);
             if (item) delete item;
             clear_post_office_fields();
@@ -1148,6 +1148,19 @@ public:
         bd.post_offices[indx].address = ui.post_office_address->text().toStdString();
         bd.post_offices[indx].region = ui.post_office_region->text().toStdString();
         clear_post_office_fields();
+        }
+    }
+
+    void on_newspapers_per_post_office_del() {
+        int indx = ui.post_office_list->currentRow();
+        if(indx != -1 && bd.post_offices.size() > 0) {
+            PostOffice* post_office = &bd.post_offices[bd.get_location_post_office_by_index(ui.post_office_list->currentItem()->data(Qt::UserRole).toInt())];
+            int indx2 = ui.newspapers_per_post_office_list->currentRow();
+            if(indx2 == -1) return;
+            int id = ui.newspapers_per_post_office_list->currentItem()->data(Qt::UserRole).toInt();
+            int ind = ui.newspapers_per_post_office_list->currentItem()->data(Qt::UserRole+1).toInt();
+            post_office->del_order(std::tuple<int, int>(id, ind));
+            update_newspapers_per_post_office_list(indx);
         }
     }
 
